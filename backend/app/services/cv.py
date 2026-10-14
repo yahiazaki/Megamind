@@ -165,7 +165,7 @@ def render_docx(profile: dict, cv: dict, out: Path) -> Path:
         if links.get(label):
             contact.add_run("  |  ")
             url = links[label] if links[label].startswith("http") else "https://" + links[label]
-            _hyperlink(contact, url, label.capitalize() if label != "linkedin" else "LinkedIn")
+            _hyperlink(contact, url, {"linkedin": "LinkedIn", "github": "GitHub"}.get(label, label.capitalize()))
 
     if cv.get("summary"):
         _section(d, "Summary")
