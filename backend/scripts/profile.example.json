@@ -1,0 +1,23 @@
+{
+ "name": "Your Name",
+ "headline": "Software Engineer",
+ "location": "City, Country",
+ "email": "you@example.com",
+ "phone": "+00 000 000 0000",
+ "show_phone_publicly": false,
+ "links": {"linkedin": "https://www.linkedin.com/in/you", "github": "https://github.com/you"},
+ "current": {"role": "Engineer", "company": "Company", "since": "Jan 2026"},
+ "summary": "Two or three sentences about you.",
+ "experience": [
+  {"role": "Engineer", "company": "Company", "location": "City", "start": "Jan 2026", "end": "Present",
+   "highlights": ["What you built and the impact it had."]}
+ ],
+ "projects": [
+  {"name": "Project", "stack": ["Python"], "highlights": ["What it does."], "link": "https://github.com/you/project"}
+ ],
+ "skills": {"Programming": ["Python"]},
+ "certifications": ["Course — Provider"],
+ "education": [{"degree": "B.Sc. ...", "school": "University", "location": "City", "start": "2020", "end": "2024"}],
+ "languages": ["English"],
+ "interests": ["..."]
+}

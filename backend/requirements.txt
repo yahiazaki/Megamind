@@ -1,0 +1,17 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+sqlmodel==0.0.22
+pydantic-settings==2.7.1
+python-multipart==0.0.20
+httpx==0.28.1
+itsdangerous==2.2.0
+numpy>=2.1
+rank-bm25==0.2.2
+python-docx==1.1.2
+pymupdf>=1.25
+pywin32>=308; sys_platform == "win32"
+apscheduler==3.11.0
+tzdata>=2024.2
+google-api-python-client==2.159.0
+google-auth-oauthlib==1.2.1
+google-auth-httplib2==0.2.0

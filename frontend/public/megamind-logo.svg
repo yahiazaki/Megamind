@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- oversized cranium + narrow jaw -->
+  <path d="M128 14 C 196 14 236 58 236 112 C 236 146 220 168 196 180 C 186 214 160 242 128 242
+           C 96 242 70 214 60 180 C 36 168 20 146 20 112 C 20 58 60 14 128 14 Z"
+        fill="#2f8cf0" stroke="#082f78" stroke-width="5"/>
+  <!-- light from the top-left -->
+  <path d="M60 60 C 80 32 120 24 150 30 C 112 36 84 56 70 92 C 62 84 58 72 60 60 Z" fill="#8fd0ff" opacity="0.55"/>
+  <!-- shadow under the dome -->
+  <path d="M40 150 C 70 172 186 172 216 150 C 210 166 200 176 196 180 C 160 192 96 192 60 180 C 54 174 46 164 40 150 Z"
+        fill="#1660c8" opacity="0.6"/>
+  <!-- brain folds -->
+  <g fill="none" stroke="#d6eeff" stroke-width="5" stroke-linecap="round" opacity="0.85">
+    <path d="M70 70 C 82 52 104 50 112 64 C 120 50 142 50 150 64"/>
+    <path d="M150 64 C 160 50 184 54 190 74"/>
+    <path d="M56 104 C 70 90 92 96 96 110 C 108 96 128 98 132 112"/>
+    <path d="M132 112 C 142 98 166 98 172 112 C 182 100 200 104 204 118"/>
+    <path d="M128 30 L 128 98" opacity="0.6"/>
+  </g>
+  <!-- eyes -->
+  <path d="M78 164 C 90 150 112 150 120 164 C 110 174 90 176 78 164 Z" fill="#e8f6ff" stroke="#082f78" stroke-width="3"/>
+  <path d="M136 164 C 144 150 166 150 178 164 C 166 176 146 174 136 164 Z" fill="#e8f6ff" stroke="#082f78" stroke-width="3"/>
+  <circle cx="102" cy="163" r="6.5" fill="#062a6b"/>
+  <circle cx="154" cy="163" r="6.5" fill="#062a6b"/>
+  <circle cx="104" cy="161" r="2" fill="#ffffff"/>
+  <circle cx="156" cy="161" r="2" fill="#ffffff"/>
+  <!-- confident smirk -->
+  <path d="M104 206 C 120 214 140 212 156 198" fill="none" stroke="#082f78" stroke-width="5" stroke-linecap="round"/>
+</svg>
