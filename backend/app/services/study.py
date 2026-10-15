@@ -21,13 +21,17 @@ STUDY_SYSTEM = """You are Megamind, Yahia's personal study assistant. Yahia wrot
 university and self-study (security, networking, Bash, APIs, databases, Python, design patterns, embedded/RTOS).
 
 How to answer:
-- Ground your answer in the NOTES excerpts below and cite them inline as [1], [2] right after the facts you use.
+- Yahia may write in English, Egyptian Arabic or Franco-Arabic (Arabic in Latin letters: 3=ع, 7=ح, 2=ء).
+  ALWAYS reply in clear English, whatever language the question is in.
+- Ground your answer in the NOTES excerpts below. Cite them inline at the end of the sentence that uses them,
+  like "TCP retransmits lost segments [2]." Never put citations on their own line.
 - If the notes do not cover something, say so in one short line, then answer from general knowledge and mark that
   part "(not in your notes)".
-- Reply in the language and style Yahia writes in (English, Egyptian Arabic, or Franco-Arabic). Technical terms stay
-  in English.
-- Teach like a sharp tutor: short structured markdown, concrete examples, and a one-line takeaway when useful.
+- Teach like a sharp tutor: concise structured markdown (usually under 250 words unless asked for depth), concrete
+  examples, and a one-line takeaway when useful.
 - Never invent citations or page numbers."""
+
+TURN_REMINDER = "\n\n(Reply in English. Cite the notes inline by excerpt number, e.g. [1] or [3], at the end of sentences.)"
 
 HELP_TEXT = """**Commands**
 - `/quiz [number] [topic]` — test me (e.g. `/quiz 5 TCP handshake`). With no topic I quiz you on what we discussed.
@@ -112,7 +116,7 @@ def _rag_answer(session_id: int, text: str, history: list[dict]) -> Iterator[str
     citations = json.loads(citations_json(hits))
     yield sse({"type": "sources", "items": citations})
     system = STUDY_SYSTEM + "\n\nNOTES:\n" + (format_context(hits) if hits else "(no matching notes found)")
-    messages = history[-8:] + [{"role": "user", "content": text}]
+    messages = history[-8:] + [{"role": "user", "content": text + TURN_REMINDER}]
     answer = []
     for tok in llm.stream_chat(messages, system=system, temperature=0.3):
         answer.append(tok)
@@ -135,6 +139,7 @@ def _parse_quiz_args(text: str) -> tuple[int, str]:
 QUIZ_SYSTEM = """You write exam questions to test a student on THEIR OWN NOTES (the excerpts below).
 Mix question types: about 60% multiple choice (4 options, exactly one correct, plausible distractors) and 40% short
 answer. Test understanding, not trivia. Each question must be answerable from the excerpts.
+Write in English. The student never sees the excerpt numbers, so explanations must not mention excerpts or [n].
 Return JSON: {"questions": [
   {"type": "mcq", "question": "...", "options": ["A", "B", "C", "D"], "answer_index": 0,
    "explanation": "why", "source": <excerpt number>, "topic": "short topic"},
@@ -231,7 +236,8 @@ def grade(session_id: int, answers: dict[int, str]) -> list[dict]:
 
 SUMMARY_SYSTEM = """You review a finished study session between Yahia and his study assistant, including quiz results.
 Be specific and honest; base strengths and weaknesses on evidence (quiz scores, questions he struggled with, topics he
-asked about repeatedly). Return JSON:
+asked about repeatedly). The summary is sent to Yahia himself, so write it in English and address him as "you".
+If nothing shows a strength, return an empty strengths list rather than saying so. Return JSON:
 {"title": "short session title", "summary": "2-3 sentences", "topics": ["..."],
  "strengths": ["specific strength with evidence"], "weaknesses": ["specific gap with evidence"],
  "study_next": [{"topic": "...", "why": "..."}]}"""
