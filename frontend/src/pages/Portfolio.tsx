@@ -274,7 +274,9 @@ function PublicChat({ name, onClose }: { name: string; onClose: () => void }) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => end.current?.scrollIntoView({ behavior: "smooth" }), [msgs]);
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: "smooth" });
+  }, [msgs]);
 
   const ask = async (q: string) => {
     if (!q.trim() || busy) return;

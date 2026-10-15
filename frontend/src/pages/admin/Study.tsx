@@ -57,7 +57,10 @@ export default function Study() {
       setMessages(r.messages);
     });
   }, [sessionId]);
-  useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth" }), [messages]);
+  useEffect(() => {
+    // braces matter: newer browsers return a Promise from scrollIntoView, which React would treat as a cleanup
+    bottom.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const newSession = async () => {
     const s = await api.send<Session>("/api/sessions");
