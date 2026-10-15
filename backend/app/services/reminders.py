@@ -38,6 +38,25 @@ def create(title: str, start: datetime, end: datetime | None = None, notes: str 
         return r
 
 
+def sync_pending() -> int:
+    """Copy upcoming reminders that were saved while Google was not connected. Returns how many were synced."""
+    now = datetime.now()
+    synced = 0
+    with session_scope() as s:
+        rows = s.exec(select(Reminder).where(Reminder.google_event_id == "", Reminder.start >= now - timedelta(hours=1))).all()
+        for r in rows:
+            try:
+                r.google_event_id = gcal.create_event(r.title, r.start, r.end, r.notes, r.all_day)
+            except Exception as e:
+                log.warning("Google Calendar sync failed for reminder %s: %s", r.id, e)
+                continue
+            if r.google_event_id:
+                s.add(r)
+                synced += 1
+        s.commit()
+    return synced
+
+
 def parse_and_create(message: str) -> Reminder:
     tz = get_settings().timezone
     now = datetime.now(ZoneInfo(tz))

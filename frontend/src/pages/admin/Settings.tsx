@@ -22,7 +22,10 @@ export default function Settings() {
   };
   useEffect(() => {
     load();
-    if (params.get("google") === "connected") setMsg("Google Calendar connected ✓");
+    if (params.get("google") === "connected") {
+      const n = Number(params.get("synced") ?? 0);
+      setMsg("Google Calendar connected ✓" + (n ? ` — copied ${n} saved reminder${n > 1 ? "s" : ""} to your calendar` : ""));
+    }
     if (params.get("google") === "error") setError("Google sign-in failed: " + (params.get("message") ?? ""));
   }, []);
 

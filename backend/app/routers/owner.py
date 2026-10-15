@@ -1,6 +1,8 @@
 """Admin: profile, work log, CV generator, reminders, settings, integrations and outbox."""
 import datetime as dt
+import logging
 from datetime import date, datetime
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, RedirectResponse
@@ -14,6 +16,7 @@ from ..models import Outbox, Reminder, WorkTask
 from ..security import require_admin
 from ..services import cv, gcal, profile, reminders, scheduler, whatsapp
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", dependencies=[Depends(require_admin)])
 
 # ---------------------------------------------------------------- profile + work log
@@ -217,12 +220,19 @@ def google_auth():
 
 
 @router.get("/google/callback")
-def google_callback(state: str, code: str):
+def google_callback(state: str = "", code: str = "", error: str = ""):
+    # Google sends ?error=access_denied (not a code) when sign-in is cancelled or the account is not a test user
+    if error or not code:
+        msg = ("Google refused access. Make sure your Gmail is added under Audience → Test users in Google Cloud, "
+               "then try again." if error == "access_denied" else f"Google sign-in did not finish ({error or 'no code'}).")
+        return RedirectResponse("/admin/settings?google=error&message=" + quote(msg))
     try:
         gcal.finish_auth(state, code)
-        return RedirectResponse("/admin/settings?google=connected")
+        synced = reminders.sync_pending()
+        return RedirectResponse(f"/admin/settings?google=connected&synced={synced}")
     except Exception as e:
-        return RedirectResponse(f"/admin/settings?google=error&message={str(e)[:120]}")
+        log.exception("Google sign-in failed")
+        return RedirectResponse("/admin/settings?google=error&message=" + quote(str(e)[:160]))
 
 
 @router.post("/google/disconnect")
