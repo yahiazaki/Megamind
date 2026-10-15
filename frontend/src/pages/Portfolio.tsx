@@ -102,9 +102,7 @@ export default function Portfolio() {
                 {e.company}
                 {e.location ? ` · ${e.location}` : ""}
               </div>
-              <ul className="mt-2 list-disc space-y-1 ps-5 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-                {e.highlights?.map((h, j) => <li key={j}>{h}</li>)}
-              </ul>
+              <BulletList items={e.highlights} limit={4} className="leading-relaxed" />
             </li>
           ))}
         </ol>
@@ -123,9 +121,7 @@ export default function Portfolio() {
                   </a>
                 )}
               </div>
-              <ul className="mt-2 list-disc space-y-1 ps-5 text-sm text-slate-600 dark:text-slate-300">
-                {p.highlights?.map((h, j) => <li key={j}>{h}</li>)}
-              </ul>
+              <BulletList items={p.highlights} limit={3} />
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {p.stack?.map((s) => (
                   <span key={s} className="rounded-md bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 dark:bg-brand-950 dark:text-brand-300">
@@ -234,6 +230,26 @@ export default function Portfolio() {
       )}
       {chatOpen && <PublicChat name={profile.name ?? ""} onClose={() => setChatOpen(false)} />}
     </div>
+  );
+}
+
+/** Bullet list that shows the first `limit` items (the strongest come first) with a toggle for the rest. */
+function BulletList({ items = [], limit, className = "" }: { items?: string[]; limit: number; className?: string }) {
+  const [open, setOpen] = useState(false);
+  const shown = open ? items : items.slice(0, limit);
+  return (
+    <>
+      <ul className={cx("mt-2 list-disc space-y-1 ps-5 text-sm text-slate-600 dark:text-slate-300", className)}>
+        {shown.map((h, j) => (
+          <li key={j}>{h}</li>
+        ))}
+      </ul>
+      {items.length > limit && (
+        <button onClick={() => setOpen(!open)} className="mt-1 ps-5 text-xs font-medium text-brand-600 hover:underline dark:text-brand-400">
+          {open ? "Show less" : `Show all ${items.length}`}
+        </button>
+      )}
+    </>
   );
 }
 

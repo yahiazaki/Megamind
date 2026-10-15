@@ -76,9 +76,8 @@ New documents are easier to add from **Admin → Library**: translation runs aut
 
 ### Run
 
-```powershell
-.\start.ps1
-```
+Double-click `start.bat` (or run `.\start.ps1` from PowerShell). It starts Ollama if needed, builds the frontend on
+first run, and serves the app. Keep the window open while you use Megamind; close it to stop.
 
 - Portfolio: http://localhost:8000
 - Admin: http://localhost:8000/admin

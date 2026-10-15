@@ -60,7 +60,9 @@ def _task_line(t: WorkTask) -> str:
 def profile_context(public: bool) -> str:
     p = public_profile() if public else get_profile()
     tasks = list_tasks(public_only=public)
-    parts = ["PROFILE (JSON):", json.dumps(p, ensure_ascii=False, indent=1)]
+    # CV-only keys and formatting whitespace would waste the model's context window
+    p = {k: v for k, v in p.items() if k not in ("summaries", "headlines", "show_phone_publicly", "show_email_publicly")}
+    parts = ["PROFILE (JSON):", json.dumps(p, ensure_ascii=False, separators=(",", ":"))]
     if tasks:
         parts += ["", "WORK LOG (tasks and achievements, newest first):"] + [_task_line(t) for t in tasks[:80]]
     return "\n".join(parts)

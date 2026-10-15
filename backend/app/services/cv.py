@@ -20,18 +20,25 @@ from .profile import get_profile, list_tasks
 CV_SYSTEM = """You are an expert technical recruiter tailoring a one-page CV to a target job.
 You are given the candidate's REAL facts as numbered items. You do not write experience; you SELECT it.
 
-- For each role, pick the 3-5 bullet ids most relevant to the job, most relevant first.
+- Always include the current role E1. Include other roles that help this application; you may leave out a role
+  that is unrelated to the job.
+- For each included role, pick the 3-5 bullet ids most relevant to the job, most relevant first.
 - Pick the 2-3 most relevant projects and, for each, 1-3 of its bullet ids.
-- Group the candidate's listed skills into 3-5 categories, job-relevant first. Use only skills from the SKILLS list.
+- Group the candidate's skills into 3-5 categories, job-relevant first. Copy skill names exactly from SKILLS.
+- Pick the relevant certification ids, most relevant first.
+- Pick the summary_track closest to the job (one of the SUMMARY TRACKS).
 - Write a headline and a 2-3 sentence summary that use only facts present in the items. Do not claim tools,
   certifications, job titles or years of experience the candidate does not have; skills from the job description
   that the candidate lacks must not appear anywhere.
 - match_notes is private advice for the candidate: honest fit, real gaps, what to emphasise in an interview.
+  It must be factual too: name requirements the candidate lacks as gaps, never as strengths.
+- Group at most 4 skill categories with at most 10 skills each.
 Return JSON:
-{"headline": "...", "summary": "...",
+{"headline": "...", "summary": "...", "summary_track": "...",
  "experience": [{"id": "E1", "bullets": ["E1.3", "E1.1"]}],
  "projects": [{"id": "P2", "bullets": ["P2.1"]}],
  "skills": [{"category": "...", "items": ["..."]}],
+ "certifications": ["C2", "C1"],
  "match_notes": "..."}"""
 
 TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+#.&/-]*[a-z0-9+#]|[a-z0-9]", re.I)
@@ -87,9 +94,10 @@ def _fact_sheet(profile: dict) -> tuple[str, dict[str, str], dict[str, dict], di
             bullets[f"{pid}.{j}"] = b
             lines.append(f"  {pid}.{j}: {b}")
     skills = [s for items in profile.get("skills", {}).values() for s in items]
-    lines += ["\nSKILLS: " + ", ".join(skills),
-              "\nCERTIFICATIONS: " + "; ".join(profile.get("certifications", [])),
-              "\nEDUCATION: " + "; ".join(f"{e.get('degree')}, {e.get('school')}" for e in profile.get("education", [])),
+    lines += ["\nSKILLS: " + ", ".join(skills), "\nCERTIFICATIONS:"]
+    lines += [f"  C{i}: {c}" for i, c in enumerate(profile.get("certifications", []), 1)]
+    lines += ["\nEDUCATION: " + "; ".join(f"{e.get('degree')}, {e.get('school')}" for e in profile.get("education", [])),
+              "\nSUMMARY TRACKS: " + (", ".join(profile.get("summaries", {})) or "none"),
               "\nPROFILE SUMMARY: " + profile.get("summary", "")]
     return "\n".join(lines), bullets, roles, projects
 
@@ -106,6 +114,15 @@ def _clean_prose(text: str, fallback: str, allowed: set[str], job_terms: set[str
     return " ".join(kept) if len(kept) >= 2 and len(kept) * 2 >= len(sentences) else fallback
 
 
+GAP_RE = re.compile(r"\b(lacks?|lacking|gaps?|missing|without|not|no|consider|learn|study|build up)\b", re.I)
+
+
+def _clean_notes(text: str, allowed: set[str], job_terms: set[str]) -> str:
+    """Private advice may name missing skills as gaps, but must not credit the candidate with them."""
+    sentences = [s for s in re.split(r"(?<=[.!?])\s+", (text or "").strip()) if s]
+    return " ".join(s for s in sentences if _grounded(s, allowed, job_terms) or GAP_RE.search(s))
+
+
 def _assemble(profile: dict, data: dict, bullets: dict, roles: dict, projects: dict, job_description: str) -> dict:
     """Build the printed CV from real facts only, using the model's choices for selection and order."""
     facts_text = " ".join([json.dumps(profile, ensure_ascii=False)] + list(bullets.values()))
@@ -117,8 +134,16 @@ def _assemble(profile: dict, data: dict, bullets: dict, roles: dict, projects: d
         return list(dict.fromkeys(out))[:limit]
 
     chosen_roles = {x.get("id"): x.get("bullets", []) for x in data.get("experience", []) if isinstance(x, dict)}
+    listed = {r for r in chosen_roles if r in roles}
+    keep = (listed | {"E1"}) if listed else set(roles)
+    for rid in roles:  # a one-role CV looks thin; keep at least two
+        if len(keep) >= min(2, len(roles)):
+            break
+        keep.add(rid)
     experience = []
-    for rid, e in roles.items():  # every real role stays, in profile order
+    for rid, e in roles.items():  # real roles only, in profile order
+        if rid not in keep:
+            continue
         own = [bullets[k] for k in bullets if k.startswith(rid + ".")]
         chosen = pick(chosen_roles.get(rid, []), rid, 5)
         chosen += [b for b in own if b not in chosen][:max(0, min(3, len(own)) - len(chosen))]
@@ -146,22 +171,34 @@ def _assemble(profile: dict, data: dict, bullets: dict, roles: dict, projects: d
             continue
         items = [real_skills[i.lower()] for i in _as_list(grp.get("items")) if i.lower() in real_skills
                  and i.lower() not in used]
+        items = items[:10]
         used.update(i.lower() for i in items)
-        if items:
+        if items and len(skills) < 4:
             skills.append({"category": str(grp.get("category", "Skills")), "items": items})
     if not skills:
         skills = [{"category": k, "items": v} for k, v in profile.get("skills", {}).items()]
 
+    certs = profile.get("certifications", [])
+    picked = [certs[int(c[1:]) - 1] for c in data.get("certifications", [])
+              if isinstance(c, str) and re.fullmatch(r"C\d+", c) and 0 < int(c[1:]) <= len(certs)]
+    picked = list(dict.fromkeys(picked)) or list(certs)
+
+    # if the model's own summary fails the fact check, use the candidate's real summary for the closest track
+    summaries = profile.get("summaries", {})
+    track = str(data.get("summary_track", "")).lower()
+    fallback = summaries.get(track) or profile.get("summary", "")
     headline = data.get("headline", "")
+    if not (headline and _grounded(headline, allowed, job_terms)):
+        headline = profile.get("headlines", {}).get(track) or profile.get("headline", "")
     return {
-        "headline": headline if headline and _grounded(headline, allowed, job_terms) else profile.get("headline", ""),
-        "summary": _clean_prose(data.get("summary", ""), profile.get("summary", ""), allowed, job_terms),
+        "headline": headline,
+        "summary": _clean_prose(data.get("summary", ""), fallback, allowed, job_terms),
         "experience": experience,
         "projects": proj,
         "skills": skills,
-        "certifications": list(profile.get("certifications", [])),
+        "certifications": picked,
         "education": list(profile.get("education", [])),
-        "match_notes": data.get("match_notes", ""),
+        "match_notes": _clean_notes(data.get("match_notes", ""), allowed, job_terms),
     }
 
 

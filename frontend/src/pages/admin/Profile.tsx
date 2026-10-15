@@ -4,7 +4,7 @@ import { api } from "../../lib/api";
 import { Profile } from "../../lib/types";
 import { Button, Card, ErrorNote, Field, Input, PageHeader, Textarea } from "../../components/ui";
 
-const ADVANCED_KEYS = ["experience", "projects", "skills", "certifications", "education", "languages", "interests"];
+const ADVANCED_KEYS = ["experience", "projects", "skills", "certifications", "education", "summaries", "headlines", "languages", "interests"];
 
 export default function ProfilePage() {
   const [p, setP] = useState<Profile | null>(null);
