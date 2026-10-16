@@ -206,8 +206,16 @@ def _style_book(d):
 
 def _add_image(d, path: Path, caption: str):
     from docx.shared import Inches
+    width = 5.6
+    try:  # cap the height so tall screenshots do not take a whole page
+        import pymupdf
+        pix = pymupdf.Pixmap(str(path))
+        if pix.width and pix.height:
+            width = min(5.6, 3.4 * pix.width / pix.height, pix.width / 96)
+    except Exception:
+        pass
     try:
-        d.add_picture(str(path), width=Inches(6.0))
+        d.add_picture(str(path), width=Inches(max(width, 1.5)))
     except Exception:
         try:
             d.add_picture(str(path))
@@ -228,13 +236,38 @@ def _split_row(line: str) -> list[str]:
     return [c.strip().replace("\\|", "|") for c in cells]
 
 
+BLOCK_START = re.compile(r"^\s*(#{1,6}\s|```|\||!\[|\[\[IMG:|>|[-*]\s|\d+\.\s|(-{3,}|\*{3,})\s*$)")
+
+
+def _unwrap(lines: list[str]) -> list[str]:
+    """Join hard-wrapped lines into logical paragraphs / list items (code blocks and tables are left alone)."""
+    out: list[str] = []
+    in_code = False
+    for line in lines:
+        s = line.strip()
+        if s.startswith("```"):
+            in_code = not in_code
+            out.append(line)
+            continue
+        if in_code:
+            out.append(line)
+            continue
+        prev = out[-1].strip() if out else ""
+        joinable_prev = prev and not re.match(r"^(#{1,6}\s|```|\||!\[|\[\[IMG:|(-{3,}|\*{3,})\s*$)", prev)
+        if s and not BLOCK_START.match(line) and joinable_prev:
+            out[-1] = out[-1].rstrip() + " " + s
+        else:
+            out.append(line)
+    return out
+
+
 def markdown_to_docx(text: str, out_docx: Path, title: str | None = None, image_dir: Path | None = None) -> Path:
     d = docx.Document()
     _style_book(d)
     if title and not text.lstrip().startswith("# "):
         d.add_heading(title, level=0)
 
-    lines = text.splitlines()
+    lines = _unwrap(text.splitlines())
     i = 0
     while i < len(lines):
         line = lines[i]
@@ -291,11 +324,19 @@ def markdown_to_docx(text: str, out_docx: Path, title: str | None = None, image_
             _add_inline(d.add_paragraph(style="List Bullet"),
                         ("☑ " if done else "☐ ") + re.sub(r"^[-*]\s+\[[ xX]\]\s+", "", stripped))
         elif re.match(r"^[-*]\s+", stripped):
-            _add_inline(d.add_paragraph(style="List Bullet 2" if indent >= 2 else "List Bullet"),
-                        re.sub(r"^[-*]\s+", "", stripped))
+            p = d.add_paragraph(style="List Bullet 2" if indent >= 2 else "List Bullet")
+            p.paragraph_format.space_after = Pt(2)
+            _add_inline(p, re.sub(r"^[-*]\s+", "", stripped))
         elif re.match(r"^\d+\.\s+", stripped):
-            _add_inline(d.add_paragraph(style="List Number 2" if indent >= 2 else "List Number"),
-                        re.sub(r"^\d+\.\s+", "", stripped))
+            # literal numbers: Word's "List Number" style would keep counting across separate lists
+            from docx.shared import Inches
+            num, body = re.match(r"^(\d+)\.\s+(.*)", stripped).groups()
+            p = d.add_paragraph()
+            p.paragraph_format.left_indent = Inches(0.5 if indent >= 2 else 0.3)
+            p.paragraph_format.first_line_indent = Inches(-0.25)
+            p.paragraph_format.space_after = Pt(2)
+            p.add_run(f"{num}.\t")
+            _add_inline(p, body)
         elif re.match(r"^(-{3,}|\*{3,})$", stripped):
             pass  # horizontal rule: section spacing already separates content
         elif stripped.startswith(">"):
