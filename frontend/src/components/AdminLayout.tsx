@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { BellRing, BookOpen, Briefcase, FileText, GraduationCap, Globe, LogOut, Menu, Settings, UserRound, X } from "lucide-react";
+import { BellRing, BookOpen, Briefcase, FileText, GraduationCap, Globe, LogOut, Menu, NotebookPen, Settings, UserRound, X } from "lucide-react";
 import { Logo } from "./Logo";
 import { api } from "../lib/api";
 import { cx } from "./ui";
 
 const NAV = [
   { to: "/admin", label: "Study", icon: GraduationCap, end: true },
+  { to: "/admin/notes", label: "Notes", icon: NotebookPen },
   { to: "/admin/library", label: "Library & Book", icon: BookOpen },
   { to: "/admin/reminders", label: "Reminders", icon: BellRing },
   { to: "/admin/work", label: "Work log", icon: Briefcase },

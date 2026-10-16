@@ -20,6 +20,7 @@ class Document(SQLModel, table=True):
     page_count: int = 0
     book_start_page: Optional[int] = None
     translate: bool = True
+    polish: bool = False               # restructure into book style with the local model before ingesting
     status: str = "pending"            # pending | processing | ready | error
     error: str = ""
     created_at: datetime = Field(default_factory=now)
@@ -118,6 +119,19 @@ class Outbox(SQLModel, table=True):
     status: str = "pending"            # pending | sent | failed | skipped
     error: str = ""
     created_at: datetime = Field(default_factory=now)
+
+
+class Note(SQLModel, table=True):
+    """A page in the notes workspace. HTML is the editor's source of truth; markdown is derived for RAG/export."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str = "Untitled"
+    html: str = ""
+    markdown: str = ""
+    document_id: Optional[int] = None  # library document created when the note is added to the book
+    book_part: str = ""                # part of the book it was added to
+    published_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=now)
+    updated_at: datetime = Field(default_factory=now)
 
 
 class Setting(SQLModel, table=True):

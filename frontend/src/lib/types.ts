@@ -123,3 +123,29 @@ export type Reminder = {
   all_day: boolean;
   google: boolean;
 };
+
+export type NoteSummary = {
+  id: number;
+  title: string;
+  updated_at: string;
+  in_book: boolean;
+  book_part: string;
+  published_at: string | null;
+  stale: boolean;
+};
+
+export type Note = NoteSummary & {
+  html: string;
+  markdown: string;
+  document_status?: string;
+  document_error?: string;
+  book_page?: number | null;
+};
+
+export type AssistResult = {
+  action: "insert" | "replace_selection" | "replace_note" | "reply";
+  content: string;
+  message: string;
+  used_book: boolean;
+  sources: Citation[];
+};

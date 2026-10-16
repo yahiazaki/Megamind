@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { BellRing, BookOpen, Loader2, Plus, Send, Square, Trash2 } from "lucide-react";
 import { api, fmtDate, streamEvents } from "../../lib/api";
@@ -8,6 +8,7 @@ import { QuizCard } from "../../components/QuizCard";
 import { SummaryCard } from "../../components/SummaryCard";
 import { SourceViewer } from "../../components/SourceViewer";
 import { Button, cx } from "../../components/ui";
+import { Mention, MentionTextarea, activeMentions } from "../../components/MentionTextarea";
 
 const COMMANDS = [
   { cmd: "/quiz 5 ", label: "/quiz", hint: "test me" },
@@ -31,6 +32,7 @@ export default function Study() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [current, setCurrent] = useState<Session | null>(null);
   const [input, setInput] = useState("");
+  const [mentions, setMentions] = useState<Mention[]>([]);
   const [busy, setBusy] = useState(false);
   const [source, setSource] = useState<Partial<Citation> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -101,7 +103,7 @@ export default function Study() {
     try {
       await streamEvents(
         `/api/sessions/${sid}/messages`,
-        { text },
+        { text, mentions: activeMentions(text, mentions).map((m) => m.id) },
         (e) => {
           switch (e.type) {
             case "status":
@@ -146,12 +148,6 @@ export default function Study() {
   const submit = (e: FormEvent) => {
     e.preventDefault();
     send(input);
-  };
-  const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      send(input);
-    }
   };
 
   return (
@@ -263,15 +259,15 @@ export default function Study() {
               ))}
             </div>
             <div className="flex items-end gap-2">
-              <textarea
+              <MentionTextarea
                 ref={inputRef}
-                rows={1}
-                dir="auto"
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={onKey}
-                placeholder="Ask about your notes… (Enter to send, Shift+Enter for a new line)"
-                className="max-h-40 min-h-11 flex-1 resize-y rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-slate-700 dark:bg-slate-950"
+                onChange={setInput}
+                mentions={mentions}
+                onMentionsChange={setMentions}
+                onSubmit={() => send(input)}
+                placeholder="Ask about your notes… type @ to include a note (Enter to send, Shift+Enter for a new line)"
+                className="max-h-40 min-h-11 resize-y border-slate-300"
               />
               {busy ? (
                 <Button type="button" variant="secondary" onClick={() => abortRef.current?.abort()} aria-label="Stop">

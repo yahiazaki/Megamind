@@ -10,14 +10,14 @@ from .config import get_settings
 from .db import init_db
 from .ingest.pipeline import recover_interrupted
 from .rag.index import index
-from .routers import library, owner, public, study
+from .routers import library, notes, owner, public, study
 from .services import scheduler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 settings = get_settings()
 app = FastAPI(title="Megamind", version="0.1.0")
 
-for r in (public.router, library.router, study.router, owner.router):
+for r in (public.router, library.router, study.router, owner.router, notes.router):
     app.include_router(r)
 
 

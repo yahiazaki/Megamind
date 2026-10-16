@@ -83,3 +83,35 @@ body {
 .cite-chip {
   @apply mx-0.5 inline-flex h-5 min-w-5 cursor-pointer items-center justify-center rounded-full bg-brand-100 px-1 align-text-top text-[11px] font-semibold text-brand-800 hover:bg-brand-200 dark:bg-brand-900 dark:text-brand-100;
 }
+
+/* ---------- Notes editor (TipTap) ---------- */
+.mm-editor {
+  @apply min-h-[60vh] text-[15.5px] leading-relaxed text-slate-800 dark:text-slate-100;
+}
+.mm-editor > * + * { @apply mt-3; }
+.mm-editor h1 { @apply mt-6 text-3xl font-bold tracking-tight; }
+.mm-editor h2 { @apply mt-5 text-2xl font-semibold tracking-tight text-brand-800 dark:text-brand-200; }
+.mm-editor h3 { @apply mt-4 text-lg font-semibold; }
+.mm-editor ul:not([data-type="taskList"]) { @apply list-disc ps-6; }
+.mm-editor ol { @apply list-decimal ps-6; }
+.mm-editor li > p { @apply my-0.5; }
+.mm-editor ul[data-type="taskList"] { @apply ps-1; }
+.mm-editor ul[data-type="taskList"] li { @apply flex items-start gap-2; }
+.mm-editor ul[data-type="taskList"] li > label { @apply mt-1 select-none; }
+.mm-editor ul[data-type="taskList"] li > div { @apply flex-1; }
+.mm-editor ul[data-type="taskList"] li[data-checked="true"] > div { @apply text-slate-400 line-through; }
+.mm-editor blockquote { @apply border-s-4 border-brand-200 ps-4 text-slate-600 italic dark:border-brand-800 dark:text-slate-300; }
+.mm-editor code { @apply rounded bg-slate-100 px-1 py-0.5 font-mono text-[0.88em] text-brand-800 dark:bg-slate-800 dark:text-brand-200; }
+.mm-editor pre { @apply overflow-x-auto rounded-lg bg-slate-900 p-4 font-mono text-sm text-slate-100; }
+.mm-editor pre code { @apply bg-transparent p-0 text-inherit; }
+.mm-editor mark { @apply rounded bg-yellow-200 px-0.5 dark:bg-yellow-700/60 dark:text-white; }
+.mm-editor a { @apply text-brand-600 underline dark:text-brand-300; }
+.mm-editor hr { @apply my-6 border-slate-200 dark:border-slate-700; }
+.mm-editor table { @apply w-full border-collapse text-sm; }
+.mm-editor th, .mm-editor td { @apply border border-slate-300 px-2 py-1 align-top dark:border-slate-700; }
+.mm-editor th { @apply bg-slate-50 font-semibold dark:bg-slate-800; }
+.mm-editor .selectedCell { @apply bg-brand-50 dark:bg-brand-950; }
+.mm-editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  @apply pointer-events-none float-left h-0 text-slate-400;
+}

@@ -16,6 +16,7 @@ router = APIRouter(prefix="/api/sessions", dependencies=[Depends(require_admin)]
 
 class MessageIn(BaseModel):
     text: str
+    mentions: list[int] = []  # @mentioned notes from the workspace
 
 
 class GradeIn(BaseModel):
@@ -85,7 +86,7 @@ def post_message(session_id: int, body: MessageIn):
     with session_scope() as s:
         if not s.get(ChatSession, session_id):
             raise HTTPException(404)
-    return StreamingResponse(study.handle_message(session_id, body.text), media_type="text/event-stream",
+    return StreamingResponse(study.handle_message(session_id, body.text, body.mentions), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 

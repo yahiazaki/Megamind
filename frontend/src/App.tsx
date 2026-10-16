@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api } from "./lib/api";
 import AdminLayout from "./components/AdminLayout";
 import Portfolio from "./pages/Portfolio";
 import Login from "./pages/Login";
 import Study from "./pages/admin/Study";
+const Notes = lazy(() => import("./pages/admin/Notes"));
 import Library from "./pages/admin/Library";
 import ProfilePage from "./pages/admin/Profile";
 import Work from "./pages/admin/Work";
@@ -38,6 +39,8 @@ export default function App() {
       >
         <Route index element={<Study />} />
         <Route path="study/:id" element={<Study />} />
+        <Route path="notes" element={<Suspense fallback={<div className="p-10 text-center text-slate-400">Loading…</div>}><Notes /></Suspense>} />
+        <Route path="notes/:id" element={<Suspense fallback={<div className="p-10 text-center text-slate-400">Loading…</div>}><Notes /></Suspense>} />
         <Route path="library" element={<Library />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="work" element={<Work />} />

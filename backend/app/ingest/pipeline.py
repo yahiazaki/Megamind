@@ -16,7 +16,7 @@ from .. import llm
 from ..config import get_settings
 from ..db import session_scope
 from ..models import Chunk, Document, Job
-from . import book, chunk, convert, translate
+from . import book, chunk, convert, restructure, translate
 from .detect import needs_translation
 
 log = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ def ingest_document(doc_id: int, job_id: int | None = None, rebuild: bool = True
     s_ = get_settings()
     with session_scope() as s:
         doc = s.get(Document, doc_id)
-        src, title, do_translate = Path(doc.source_path), doc.title, doc.translate
+        src, title, do_translate, do_polish = Path(doc.source_path), doc.title, doc.translate, bool(doc.polish)
     _doc_update(doc_id, status="processing", error="")
     _job_update(job_id, status="running", message="Preparing document", progress=0.02)
     try:
@@ -67,8 +67,15 @@ def ingest_document(doc_id: int, job_id: int | None = None, rebuild: bool = True
         tmp = s_.data_dir / "tmp"
 
         if ext in convert.TEXT_EXTS:
-            work = convert.markdown_to_docx(src.read_text(encoding="utf-8", errors="replace"),
-                                            tmp / f"{doc_id}.docx", title=title)
+            text = src.read_text(encoding="utf-8", errors="replace")
+            if do_polish:
+                def polish_progress(done, total):
+                    _job_update(job_id, progress=0.05 + 0.5 * done / max(total, 1),
+                                message=f"Rewriting into book style: section {done}/{total}")
+                text = restructure.polish_markdown(text, title, llm.chat_json, polish_progress)
+                (s_.data_dir / "book_src" / f"doc-{doc_id}.md").write_text(text, encoding="utf-8")
+            work = convert.markdown_to_docx(text, tmp / f"{doc_id}.docx", title=title,
+                                            image_dir=src.parent)
         elif ext == ".pdf" and do_translate and _pdf_needs_translation(src):
             _job_update(job_id, message="Reflowing PDF into an editable document", progress=0.05)
             try:

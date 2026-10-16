@@ -72,7 +72,7 @@ def _history(session_id: int, limit: int = 10) -> list[dict]:
 # Chat turn
 # ---------------------------------------------------------------------------
 
-def handle_message(session_id: int, text: str) -> Iterator[str]:
+def handle_message(session_id: int, text: str, mentions: list[int] | None = None) -> Iterator[str]:
     text = text.strip()
     history = _history(session_id)
     _save_message(session_id, "user", text)
@@ -102,20 +102,26 @@ def handle_message(session_id: int, text: str) -> Iterator[str]:
             _save_message(session_id, "assistant", msg, kind="reminder", payload=json.dumps(data))
             yield sse({"type": "reminder", "data": data, "text": msg})
         else:
-            yield from _rag_answer(session_id, text, history)
+            yield from _rag_answer(session_id, text, history, mentions or [])
     except Exception as e:
         log.exception("chat turn failed")
         yield sse({"type": "error", "text": f"Something went wrong: {e}"})
     yield sse({"type": "done"})
 
 
-def _rag_answer(session_id: int, text: str, history: list[dict]) -> Iterator[str]:
+def _rag_answer(session_id: int, text: str, history: list[dict], mentions: list[int]) -> Iterator[str]:
     yield sse({"type": "status", "text": "Searching your notes…"})
     queries = build_queries(text, history)
     hits = index.search(queries, k=6)
     citations = json.loads(citations_json(hits))
     yield sse({"type": "sources", "items": citations})
     system = STUDY_SYSTEM + "\n\nNOTES:\n" + (format_context(hits) if hits else "(no matching notes found)")
+    if mentions:
+        from .notes import mention_context
+        ctx = mention_context(mentions)
+        if ctx:
+            system += ("\n\nWORKSPACE NOTES Yahia @mentioned (his own pages; use them first and refer to them by "
+                       "name, not by number):\n" + ctx)
     messages = history[-8:] + [{"role": "user", "content": text + TURN_REMINDER}]
     answer = []
     for tok in llm.stream_chat(messages, system=system, temperature=0.3):

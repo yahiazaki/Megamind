@@ -101,11 +101,74 @@ def to_docx(src: Path, out_docx: Path) -> Path:
     return out_docx
 
 
+HTML_TEMPLATE = """<!doctype html><html><head><meta charset="utf-8"><title>{title}</title>
+<style>
+body {{ font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1.35; }}
+h1 {{ font-size: 22pt; color: #0B3F9E; }} h2 {{ font-size: 16pt; color: #0B3F9E; }} h3 {{ font-size: 13pt; }}
+code, pre {{ font-family: Consolas, monospace; font-size: 9.5pt; }} pre {{ background: #F3F5F9; padding: 6pt; }}
+blockquote {{ border-left: 3pt solid #9DB6E8; margin-left: 0; padding-left: 9pt; color: #444; }}
+mark {{ background: #FFF3A3; }} table {{ border-collapse: collapse; }} td, th {{ border: 1px solid #999; padding: 3pt 6pt; }}
+</style></head><body><h1>{title}</h1>{body}</body></html>"""
+
+
+def html_export(html: str, title: str, out: Path, fmt: str) -> Path:
+    """Render editor HTML to .docx or .pdf with Word (LibreOffice fallback), keeping formatting and font sizes."""
+    import html as htmllib
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    src = out.with_suffix(".src.html")
+    # Word ignores <mark>; its own highlight property survives the conversion
+    html = re.sub(r"<mark\b[^>]*>", '<span style="background:yellow;mso-highlight:yellow">', html)
+    html = html.replace("</mark>", "</span>")
+    src.write_text(HTML_TEMPLATE.format(title=htmllib.escape(title), body=html), encoding="utf-8")
+    try:
+        def run(word):
+            d = word.Documents.Open(str(src.resolve()), ConfirmConversions=False, ReadOnly=True,
+                                    AddToRecentFiles=False, Visible=False)
+            try:
+                if fmt == "pdf":
+                    d.ExportAsFixedFormat(OutputFileName=str(out.resolve()), ExportFormat=WD_EXPORT_PDF,
+                                          OpenAfterExport=False, OptimizeFor=0,
+                                          CreateBookmarks=WD_EXPORT_HEADING_BOOKMARKS)
+                else:
+                    d.SaveAs2(str(out.resolve()), FileFormat=WD_FORMAT_DOCX)
+            finally:
+                d.Close(SaveChanges=0)
+        _with_word(run)
+    except Exception as e:
+        log.warning("Word export failed (%s), trying LibreOffice", e)
+        soffice = _soffice()
+        if not soffice:
+            raise RuntimeError("Neither Microsoft Word nor LibreOffice is available for export") from e
+        target = "pdf" if fmt == "pdf" else 'docx:"MS Word 2007 XML"'
+        subprocess.run([soffice, "--headless", "--convert-to", target, "--outdir", str(out.parent), str(src)],
+                       check=True, timeout=300, capture_output=True)
+        (out.parent / (src.stem + "." + fmt)).replace(out)
+    finally:
+        src.unlink(missing_ok=True)
+    return out
+
+
+def html_to_text(html: str) -> str:
+    """Plain text from editor HTML: block elements become line breaks, list items get bullets."""
+    import html as htmllib
+
+    t = re.sub(r"(?is)<(script|style)\b.*?</\1>", "", html)
+    t = re.sub(r"(?i)<li[^>]*>", "\n• ", t)
+    t = re.sub(r"(?i)<br\s*/?>", "\n", t)
+    t = re.sub(r"(?i)</(p|h[1-6]|li|blockquote|pre|tr|div)>", "\n", t)
+    t = re.sub(r"(?i)</t[dh]>", "\t", t)
+    t = htmllib.unescape(re.sub(r"<[^>]+>", "", t))
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(line.rstrip() for line in t.splitlines())).strip() + "\n"
+
+
 # ---------------------------------------------------------------------------
 # Markdown / plain text -> .docx
 # ---------------------------------------------------------------------------
 
-INLINE_RE = re.compile(r"(\*\*[^*]+\*\*|`[^`]+`)")
+INLINE_RE = re.compile(r"(\*\*[^*]+\*\*|`[^`]+`|(?<![\w*])\*[^*\s][^*]*\*(?![\w*])|\[[^\]]+\]\([^)]+\))")
+IMAGE_RE = re.compile(r"^!\[([^\]]*)\]\(([^)]+)\)$|^\[\[IMG:([^\]]+)\]\]$")
+NAVY = RGBColor(0x0B, 0x3F, 0x9E)
 
 
 def _add_inline(par, text: str):
@@ -118,8 +181,45 @@ def _add_inline(par, text: str):
             run = par.add_run(part[1:-1])
             run.font.name = "Consolas"
             run.font.color.rgb = RGBColor(0x1F, 0x4E, 0x79)
+        elif part.startswith("[") and "](" in part:
+            par.add_run(part[1:part.index("](")]).underline = True
+        elif part.startswith("*") and part.endswith("*") and len(part) > 2:
+            par.add_run(part[1:-1]).italic = True
         else:
             par.add_run(part)
+
+
+def _style_book(d):
+    """Typography shared by every generated chapter."""
+    normal = d.styles["Normal"]
+    normal.font.name, normal.font.size = "Calibri", Pt(11)
+    normal.paragraph_format.space_after = Pt(6)
+    normal.paragraph_format.line_spacing = 1.15
+    for name, size, color in (("Title", 26, NAVY), ("Heading 1", 17, NAVY), ("Heading 2", 13.5, NAVY),
+                              ("Heading 3", 12, RGBColor(0x33, 0x33, 0x33))):
+        st = d.styles[name]
+        st.font.name, st.font.size, st.font.color.rgb, st.font.bold = "Calibri", Pt(size), color, True
+        st.paragraph_format.space_before = Pt(14 if name != "Title" else 0)
+        st.paragraph_format.space_after = Pt(6)
+        st.paragraph_format.keep_with_next = True
+
+
+def _add_image(d, path: Path, caption: str):
+    from docx.shared import Inches
+    try:
+        d.add_picture(str(path), width=Inches(6.0))
+    except Exception:
+        try:
+            d.add_picture(str(path))
+        except Exception as e:
+            log.warning("could not insert image %s: %s", path, e)
+            return
+    d.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    if caption:
+        cap = d.add_paragraph()
+        cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = cap.add_run(caption)
+        r.italic, r.font.size, r.font.color.rgb = True, Pt(9), RGBColor(0x55, 0x55, 0x55)
 
 
 def _split_row(line: str) -> list[str]:
@@ -128,11 +228,9 @@ def _split_row(line: str) -> list[str]:
     return [c.strip().replace("\\|", "|") for c in cells]
 
 
-def markdown_to_docx(text: str, out_docx: Path, title: str | None = None) -> Path:
+def markdown_to_docx(text: str, out_docx: Path, title: str | None = None, image_dir: Path | None = None) -> Path:
     d = docx.Document()
-    style = d.styles["Normal"]
-    style.font.name = "Calibri"
-    style.font.size = Pt(11)
+    _style_book(d)
     if title and not text.lstrip().startswith("# "):
         d.add_heading(title, level=0)
 
@@ -174,14 +272,32 @@ def markdown_to_docx(text: str, out_docx: Path, title: str | None = None) -> Pat
                     _add_inline(cell.paragraphs[0], row[c] if c < len(row) else "")
             d.add_paragraph()
             continue
+        img = IMAGE_RE.match(stripped)
+        if img and image_dir is not None:
+            ref = (img.group(2) or img.group(3) or "").strip()
+            for cand in (image_dir / ref, image_dir / "images" / ref):
+                if cand.exists():
+                    _add_image(d, cand, (img.group(1) or "").strip())
+                    break
+            i += 1
+            continue
         m = re.match(r"^(#{1,4})\s+(.*)", stripped)
+        indent = len(line) - len(line.lstrip(" "))
         if m:
             level = len(m.group(1))
             d.add_heading(m.group(2).strip(), level=0 if level == 1 else level - 1)
+        elif re.match(r"^[-*]\s+\[[ xX]\]\s+", stripped):
+            done = stripped[3] in "xX"
+            _add_inline(d.add_paragraph(style="List Bullet"),
+                        ("☑ " if done else "☐ ") + re.sub(r"^[-*]\s+\[[ xX]\]\s+", "", stripped))
         elif re.match(r"^[-*]\s+", stripped):
-            _add_inline(d.add_paragraph(style="List Bullet"), re.sub(r"^[-*]\s+", "", stripped))
+            _add_inline(d.add_paragraph(style="List Bullet 2" if indent >= 2 else "List Bullet"),
+                        re.sub(r"^[-*]\s+", "", stripped))
         elif re.match(r"^\d+\.\s+", stripped):
-            _add_inline(d.add_paragraph(style="List Number"), re.sub(r"^\d+\.\s+", "", stripped))
+            _add_inline(d.add_paragraph(style="List Number 2" if indent >= 2 else "List Number"),
+                        re.sub(r"^\d+\.\s+", "", stripped))
+        elif re.match(r"^(-{3,}|\*{3,})$", stripped):
+            pass  # horizontal rule: section spacing already separates content
         elif stripped.startswith(">"):
             p = d.add_paragraph(style="Intense Quote")
             _add_inline(p, stripped.lstrip("> "))

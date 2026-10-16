@@ -47,6 +47,7 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     s = Settings()
-    for sub in ("", "sources", "uploads", "pdf", "book", "cv", "google", "translated", "translation", "tmp"):
+    for sub in ("", "sources", "uploads", "pdf", "book", "cv", "google", "translated", "translation", "tmp", "notes",
+                "book_src"):
         (s.data_dir / sub).mkdir(parents=True, exist_ok=True)
     return s
