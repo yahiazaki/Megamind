@@ -31,13 +31,12 @@ import {
   X,
 } from "lucide-react";
 import { api, fmtDate } from "../../lib/api";
-import { AssistResult, Citation, Note, NoteSummary } from "../../lib/types";
+import { AssistResult, Note, NoteSummary } from "../../lib/types";
 import { htmlToMarkdown, markdownToHtml } from "../../lib/markdown";
 import { FontSize } from "../../components/editor/FontSize";
 import { Toolbar } from "../../components/editor/Toolbar";
 import { Markdown } from "../../components/Markdown";
 import { Mention, MentionTextarea, activeMentions } from "../../components/MentionTextarea";
-import { SourceViewer } from "../../components/SourceViewer";
 import { Badge, Button, cx } from "../../components/ui";
 
 type SaveState = "saved" | "saving" | "dirty" | "error";
@@ -265,7 +264,7 @@ function NoteEditor({ noteId, onSaved, onDeleted }: { noteId: number; onSaved: (
       <Badge tone="red">book update failed</Badge>
     ) : note.in_book ? (
       <Badge tone={note.stale ? "amber" : "green"}>
-        {note.stale ? "changed since added to book" : `in book · ${note.book_part}${note.book_page ? ` · p. ${note.book_page}` : ""}`}
+        {note.stale ? "changed since added to book" : `in book · ${note.book_mode === "section" ? `inside "${note.book_chapter}"` : note.book_part}${note.book_page ? ` · p. ${note.book_page}` : ""}`}
       </Badge>
     ) : null;
 
@@ -364,34 +363,60 @@ function DownloadMenu({ onPick }: { onPick: (fmt: string) => void }) {
 // Add to book
 // ---------------------------------------------------------------------------
 
+type BookPart = { part: string; chapters: { id: number; title: string; can_insert: boolean }[] };
+
 function PublishDialog({ note, onClose, onDone }: { note: Note; onClose: () => void; onDone: () => void }) {
-  const [parts, setParts] = useState<string[]>([]);
+  const [structure, setStructure] = useState<BookPart[]>([]);
   const [part, setPart] = useState(note.book_part || "");
   const [custom, setCustom] = useState("");
+  const [mode, setMode] = useState<"chapter" | "section">("chapter");
+  const [chapterId, setChapterId] = useState<number | null>(null);
+  const [update, setUpdate] = useState<"replace" | "append">("append");
   const [polish, setPolish] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api.get<string[]>("/api/notes/parts").then((p) => {
-      setParts(p);
-      if (!part) setPart(p[0] ?? "__new");
+    api.get<BookPart[]>("/api/notes/book-structure").then((s) => {
+      setStructure(s);
+      if (!part) setPart(s[0]?.part ?? "__new");
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const chapters = (structure.find((p) => p.part === part)?.chapters ?? []).filter((c) => c.can_insert);
+  useEffect(() => {
+    setChapterId(chapters.length ? chapters[chapters.length - 1].id : null); // default: the part's last chapter
+    if (!chapters.length) setMode("chapter");
+  }, [part, structure.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const submit = async () => {
     const target = part === "__new" ? custom.trim() : part;
-    if (!target) return setError("Choose a part of the book or name a new one");
+    if (!note.in_book && !target) return setError("Choose a part of the book or name a new one");
+    if (!note.in_book && mode === "section" && !chapterId) return setError("Choose the chapter to add the note into");
     setBusy(true);
     setError("");
     try {
-      await api.send(`/api/notes/${note.id}/publish`, { part: target, polish });
+      await api.send(`/api/notes/${note.id}/publish`, { part: target, polish, mode, chapter_id: chapterId, update });
       onDone();
     } catch (e: any) {
       setError(e.message);
       setBusy(false);
     }
   };
+
+  const remove = async () => {
+    if (!confirm(`Remove "${note.title}" from the book? The note itself stays in your workspace.`)) return;
+    setBusy(true);
+    await api.send(`/api/notes/${note.id}/unpublish`);
+    onDone();
+  };
+
+  const radio = "mt-0.5";
+  const box = "mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900";
+  const where =
+    note.book_mode === "section"
+      ? `a section at the end of "${note.book_chapter}" (${note.book_part})`
+      : `its own chapter in ${note.book_part}`;
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4" onClick={onClose}>
@@ -400,35 +425,83 @@ function PublishDialog({ note, onClose, onDone }: { note: Note; onClose: () => v
           <div>
             <h3 className="text-lg font-semibold">{note.in_book ? "Update in book" : "Add to book"}</h3>
             <p className="mt-1 text-sm text-slate-500">
-              "{note.title}" becomes a chapter of your book and the study chat can answer from it, with page references.
+              {note.in_book
+                ? `This note is in your book as ${where}.`
+                : `"${note.title}" goes into your book and the study chat can answer from it, with page references.`}
             </p>
           </div>
           <button onClick={onClose} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
             <X className="h-4 w-4" />
           </button>
         </div>
-        <label className="mt-4 block text-sm font-medium">Part of the book</label>
-        <select
-          value={part}
-          onChange={(e) => setPart(e.target.value)}
-          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
-        >
-          {parts.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-          <option value="__new">+ New part…</option>
-        </select>
-        {part === "__new" && (
-          <input
-            autoFocus
-            value={custom}
-            onChange={(e) => setCustom(e.target.value)}
-            placeholder="e.g. AI & Machine Learning"
-            className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-brand-400 dark:border-slate-700 dark:bg-slate-900"
-          />
+
+        {note.in_book ? (
+          <div className="mt-4 space-y-2 text-sm">
+            <div className="font-medium">What should the book get?</div>
+            <label className="flex items-start gap-2">
+              <input type="radio" className={radio} checked={update === "append"} onChange={() => setUpdate("append")} />
+              <span>
+                <span className="font-medium">Add only what's new</span>
+                <span className="block text-slate-500">Appends the paragraphs you added since the last time; what is already in the book stays as it is.</span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2">
+              <input type="radio" className={radio} checked={update === "replace"} onChange={() => setUpdate("replace")} />
+              <span>
+                <span className="font-medium">Replace with the current note</span>
+                <span className="block text-slate-500">The whole section is rewritten from the note as it is now, including your edits and deletions.</span>
+              </span>
+            </label>
+          </div>
+        ) : (
+          <>
+            <label className="mt-4 block text-sm font-medium">Part of the book</label>
+            <select value={part} onChange={(e) => setPart(e.target.value)} className={box}>
+              {structure.map((p) => (
+                <option key={p.part} value={p.part}>
+                  {p.part}
+                </option>
+              ))}
+              <option value="__new">+ New part…</option>
+            </select>
+            {part === "__new" && (
+              <input
+                autoFocus
+                value={custom}
+                onChange={(e) => setCustom(e.target.value)}
+                placeholder="e.g. AI & Machine Learning"
+                className={box + " outline-none focus:border-brand-400"}
+              />
+            )}
+            <div className="mt-4 space-y-2 text-sm">
+              <div className="font-medium">Where in that part?</div>
+              <label className="flex items-start gap-2">
+                <input type="radio" className={radio} checked={mode === "chapter"} onChange={() => setMode("chapter")} />
+                <span>
+                  <span className="font-medium">As a new chapter</span>
+                  <span className="block text-slate-500">Added after the last chapter of the part.</span>
+                </span>
+              </label>
+              <label className={cx("flex items-start gap-2", !chapters.length && "opacity-50")}>
+                <input type="radio" className={radio} disabled={!chapters.length} checked={mode === "section"} onChange={() => setMode("section")} />
+                <span className="flex-1">
+                  <span className="font-medium">Inside a chapter</span>
+                  <span className="block text-slate-500">Appended as a new section after the chapter's last section.</span>
+                  {mode === "section" && (
+                    <select value={chapterId ?? ""} onChange={(e) => setChapterId(Number(e.target.value))} className={box}>
+                      {chapters.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.title}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </span>
+              </label>
+            </div>
+          </>
         )}
+
         <label className="mt-4 flex items-start gap-2 text-sm">
           <input type="checkbox" checked={polish} onChange={(e) => setPolish(e.target.checked)} className="mt-0.5" />
           <span>
@@ -440,13 +513,22 @@ function PublishDialog({ note, onClose, onDone }: { note: Note; onClose: () => v
           </span>
         </label>
         {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={submit} loading={busy}>
-            <BookPlus className="h-4 w-4" /> {note.in_book ? "Update" : "Add to book"}
-          </Button>
+        <div className="mt-5 flex items-center justify-between gap-2">
+          {note.in_book ? (
+            <button onClick={remove} disabled={busy} className="text-sm text-red-600 hover:underline">
+              Remove from book
+            </button>
+          ) : (
+            <span />
+          )}
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button onClick={submit} loading={busy}>
+              <BookPlus className="h-4 w-4" /> {note.in_book ? "Update" : "Add to book"}
+            </Button>
+          </div>
         </div>
       </div>
     </div>
@@ -470,18 +552,16 @@ type Turn = {
 const ACTION_LABEL: Record<AssistResult["action"], string> = {
   insert: "Add to note",
   replace_selection: "Replace selection",
-  replace_note: "Replace whole note",
+  replace_note: "Rewritten note",
   reply: "Answer",
 };
 
-const IDEAS = ["Add a paragraph that explains this topic simply", "Rewrite the selected text more clearly", "Turn the selection into a table", "Summarise this note in 5 bullets"];
+const IDEAS = ["Add a section that explains this topic simply", "Add an example and restructure the note", "Rewrite the selected text more clearly", "Turn the selection into a table"];
 
 function AssistantPanel({ noteId, editor, onClose }: { noteId: number; editor: NonNullable<ReturnType<typeof useEditor>>; onClose: () => void }) {
   const [input, setInput] = useState("");
   const [mentions, setMentions] = useState<Mention[]>([]);
-  const [useBook, setUseBook] = useState(true);
   const [turns, setTurns] = useState<Turn[]>([]);
-  const [source, setSource] = useState<Partial<Citation> | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const busy = turns.some((t) => t.state === "loading");
 
@@ -503,7 +583,6 @@ function AssistantPanel({ noteId, editor, onClose }: { noteId: number; editor: N
         instruction: text,
         selection,
         mentions: activeMentions(text, mentions).map((m) => m.id),
-        use_book: useBook,
         markdown: htmlToMarkdown(editor.getHTML()),
       });
       update(turn.id, { result, state: result.action === "reply" ? "reply" : "proposed" });
@@ -547,7 +626,10 @@ function AssistantPanel({ noteId, editor, onClose }: { noteId: number; editor: N
               Ask me to write, explain, rewrite or restructure. Select text in the note first to work on just that part. Type
               <code className="mx-1 rounded bg-white px-1 dark:bg-slate-800">@</code>to bring in another note.
             </p>
-            <p>I use your book when it covers the topic and my own knowledge when it doesn't. Nothing changes until you press Apply.</p>
+            <p>
+              I answer from my own knowledge (not your book). When you ask me to add something, I rewrite the whole note with it included and
+              restructured — keeping everything you already wrote. Nothing changes until you press Apply.
+            </p>
             <div className="space-y-1.5">
               {IDEAS.map((s) => (
                 <button key={s} onClick={() => setInput(s)} className="block w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-xs hover:border-brand-300 dark:border-slate-700 dark:bg-slate-950">
@@ -574,21 +656,11 @@ function AssistantPanel({ noteId, editor, onClose }: { noteId: number; editor: N
                 <>
                   <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
                     <Badge tone={t.result.action === "reply" ? "slate" : "blue"}>{ACTION_LABEL[t.result.action]}</Badge>
-                    <Badge tone={t.result.used_book ? "green" : "slate"}>{t.result.used_book ? "from your book" : "general knowledge"}</Badge>
                   </div>
                   {t.result.message && <p className="mb-2 text-xs text-slate-500">{t.result.message}</p>}
                   <div className={cx("max-h-80 overflow-y-auto rounded-lg p-2", t.state === "proposed" && "bg-emerald-50/60 ring-1 ring-emerald-200 dark:bg-emerald-950/30 dark:ring-emerald-900")}>
                     <Markdown text={t.result.content} />
                   </div>
-                  {t.result.sources.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {t.result.sources.map((s, i) => (
-                        <button key={i} onClick={() => setSource(s)} className="rounded-md border border-slate-200 px-1.5 py-0.5 text-[11px] text-slate-500 hover:border-brand-300 dark:border-slate-700">
-                          {s.doc_title} p.{s.book_page ?? s.page}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                   <div className="mt-2 flex gap-2">
                     {t.state === "proposed" && (
                       <>
@@ -616,9 +688,6 @@ function AssistantPanel({ noteId, editor, onClose }: { noteId: number; editor: N
         <div ref={bottom} />
       </div>
       <div className="border-t border-slate-200 p-3 dark:border-slate-800">
-        <label className="mb-2 flex items-center gap-2 text-xs text-slate-500">
-          <input type="checkbox" checked={useBook} onChange={(e) => setUseBook(e.target.checked)} /> Look things up in my book
-        </label>
         <div className="flex items-end gap-2">
           <MentionTextarea
             value={input}
@@ -634,7 +703,6 @@ function AssistantPanel({ noteId, editor, onClose }: { noteId: number; editor: N
           </Button>
         </div>
       </div>
-      {source && <SourceViewer source={source} onClose={() => setSource(null)} />}
     </aside>
   );
 }

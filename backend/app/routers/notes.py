@@ -24,13 +24,16 @@ class AssistIn(BaseModel):
     instruction: str
     selection: str = ""
     mentions: list[int] = []
-    use_book: bool = True
+    use_book: bool = False           # kept for compatibility; the assistant no longer searches the book
     markdown: Optional[str] = None  # unsaved editor content
 
 
 class PublishIn(BaseModel):
-    part: str
+    part: str = ""
     polish: bool = False
+    mode: str = "chapter"            # "chapter" = its own chapter at the end of the part; "section" = inside a chapter
+    chapter_id: Optional[int] = None # the chapter to append into when mode is "section"
+    update: str = "replace"          # for notes already in the book: "replace" everything or "append" only new parts
 
 
 def _note_or_404(note_id: int):
@@ -48,6 +51,11 @@ def list_notes():
 @router.get("/parts")
 def parts():
     return notes.book_parts()
+
+
+@router.get("/book-structure")
+def book_structure():
+    return notes.book_structure()
 
 
 @router.post("")
@@ -101,7 +109,7 @@ async def assist(note_id: int, body: AssistIn):
 def publish(note_id: int, body: PublishIn):
     _note_or_404(note_id)
     try:
-        return notes.publish(note_id, body.part, body.polish)
+        return notes.publish(note_id, body.part, body.polish, body.mode, body.chapter_id, body.update)
     except ValueError as e:
         raise HTTPException(400, str(e))
 

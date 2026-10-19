@@ -70,19 +70,31 @@ class HybridIndex:
         book_page = r["start"] + r["page"] - 1 if r["start"] else None
         return Hit(r["id"], r["doc"], r["title"], r["section"], r["page"], book_page, r["text"], score)
 
+    def fingerprint(self) -> str:
+        """Changes whenever the indexed content changes; used to expire cached answers."""
+        with self._lock:
+            return f"{len(self.rows)}-{max((r['id'] for r in self.rows), default=0)}"
+
     def search(self, queries: list[str], k: int = 6, doc_ids: set[int] | None = None) -> list[Hit]:
+        return self.search_scored(queries, k, doc_ids)[0]
+
+    def search_scored(self, queries: list[str], k: int = 6,
+                      doc_ids: set[int] | None = None) -> tuple[list[Hit], float]:
+        """Hybrid search; also returns the best cosine similarity, a measure of whether the book covers the question."""
         with self._lock:
             if not self.rows:
-                return []
+                return [], 0.0
             n = len(self.rows)
             allowed = np.ones(n, dtype=bool)
             if doc_ids:
                 allowed = np.array([r["doc"] in doc_ids for r in self.rows])
             fused = np.zeros(n)
+            best = 0.0
             qvecs = llm.embed(queries)
             for qi, q in enumerate(queries):
                 dense = self.matrix @ qvecs[qi]
                 dense[~allowed] = -1
+                best = max(best, float(dense.max()))
                 for rank, i in enumerate(np.argsort(-dense)[:40]):
                     fused[i] += 1 / (60 + rank)
                 if self.bm25:
@@ -92,7 +104,7 @@ class HybridIndex:
                         if sparse[i] > 0:
                             fused[i] += 1 / (60 + rank)
             order = [i for i in np.argsort(-fused) if fused[i] > 0][:k]
-            return [self._hit(int(i), float(fused[i])) for i in order]
+            return [self._hit(int(i), float(fused[i])) for i in order], best
 
     def random_chunks(self, n: int, doc_ids: set[int] | None = None) -> list[Hit]:
         with self._lock:

@@ -1,6 +1,7 @@
 """Study sessions: grounded chat, quizzes, grading, reminders and the /end summary."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -11,7 +12,7 @@ from sqlmodel import select
 
 from .. import llm
 from ..db import session_scope
-from ..models import ChatSession, Message, QuizItem
+from ..models import AnswerCache, ChatSession, Message, QuizItem
 from ..rag.index import Hit, build_queries, citations_json, format_context, index
 from . import reminders, whatsapp
 
@@ -23,15 +24,27 @@ university and self-study (security, networking, Bash, APIs, databases, Python, 
 How to answer:
 - Yahia may write in English, Egyptian Arabic or Franco-Arabic (Arabic in Latin letters: 3=ع, 7=ح, 2=ء).
   ALWAYS reply in clear English, whatever language the question is in.
-- Ground your answer in the NOTES excerpts below. Cite them inline at the end of the sentence that uses them,
-  like "TCP retransmits lost segments [2]." Never put citations on their own line.
-- If the notes do not cover something, say so in one short line, then answer from general knowledge and mark that
-  part "(not in your notes)".
-- Teach like a sharp tutor: concise structured markdown (usually under 250 words unless asked for depth), concrete
-  examples, and a one-line takeaway when useful.
+- Answer ONLY from the NOTES excerpts below (and any @mentioned workspace notes). Do not use outside knowledge, and
+  do not fill gaps with your own facts.
+- If the excerpts do not contain the answer, reply with exactly this sentence and nothing else:
+  "I don't know — this isn't covered in your book."
+  If they cover only part of the question, answer that part and say which part is not covered.
+- Cite the excerpts inline at the end of the sentence that uses them, like "TCP retransmits lost segments [2]."
+  Never put citations on their own line.
+- Teach like a sharp tutor: concise structured markdown (usually under 250 words unless asked for depth), examples
+  taken from the notes, and a one-line takeaway when useful.
 - Never invent citations or page numbers."""
 
-TURN_REMINDER = "\n\n(Reply in English. Cite the notes inline by excerpt number, e.g. [1] or [3], at the end of sentences.)"
+TURN_REMINDER = ("\n\n(Reply in English, using only the excerpts. Cite them inline by number, e.g. [1] or [3]. "
+                 "If they don't contain the answer, say you don't know.)")
+
+NOT_IN_BOOK = "I don't know — this isn't covered in your book."
+MIN_SIMILARITY = 0.47        # below this, no passage in the book is about the question (bge-m3 cosine)
+CONFIDENT_SIMILARITY = 0.66  # above this the passages are clearly on topic; in between, check coverage first
+
+COVERAGE_SYSTEM = """You check a student's study book. Decide whether the NOTES below contain the information needed
+to answer the QUESTION, fully or in part. Judge ONLY by what the notes say — not by what you know yourself.
+Return JSON: {"covered": true | false}"""
 
 HELP_TEXT = """**Commands**
 - `/quiz [number] [topic]` — test me (e.g. `/quiz 5 TCP handshake`). With no topic I quiz you on what we discussed.
@@ -109,25 +122,101 @@ def handle_message(session_id: int, text: str, mentions: list[int] | None = None
     yield sse({"type": "done"})
 
 
+def _cache_key(text: str, history: list[dict]) -> str:
+    """Same question → same key. Short follow-ups ("explain more") depend on the conversation, so the previous answer
+    is part of their key; the book fingerprint expires every answer when the book changes."""
+    normal = re.sub(r"\s+", " ", text.lower()).strip(" ?!.")
+    context = ""
+    recent = [m for m in history if m["role"] == "assistant"]
+    if recent and len(text.split()) <= 6:
+        context = recent[-1]["content"][:2000]
+    raw = f"{normal}\n{context}\n{index.fingerprint()}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _cached(key: str) -> AnswerCache | None:
+    with session_scope() as s:
+        row = s.get(AnswerCache, key)
+        if row:
+            row.hits += 1
+            s.add(row)
+            s.commit()
+            s.refresh(row)
+        return row
+
+
+def _store(key: str, question: str, answer: str, citations: list) -> None:
+    with session_scope() as s:
+        s.merge(AnswerCache(key=key, question=question, answer=answer, sources=json.dumps(citations)))
+        s.commit()
+
+
+def _covered(text: str, queries: list[str], hits: list[Hit]) -> bool:
+    question = text if len(queries) < 2 else f"{text}  (meaning: {' / '.join(queries[1:])})"
+    try:
+        verdict = llm.chat_json(COVERAGE_SYSTEM, f"QUESTION: {question}\n\nNOTES:\n{format_context(hits)}",
+                                temperature=0)
+        return bool(verdict.get("covered"))
+    except Exception as e:
+        log.warning("coverage check failed: %s", e)
+        return True     # fall back to the strict answer prompt
+
+
 def _rag_answer(session_id: int, text: str, history: list[dict], mentions: list[int]) -> Iterator[str]:
+    if not index.stats()["chunks"]:
+        msg = "Your book is still loading — ask again in a few seconds."
+        yield sse({"type": "token", "text": msg})
+        _save_message(session_id, "assistant", msg)
+        return
+    # answers that use @mentioned notes are not cached: the notes can change at any time
+    key = None if mentions else _cache_key(text, history)
+    hit = _cached(key) if key else None
+    if hit:
+        citations = json.loads(hit.sources or "[]")
+        yield sse({"type": "status", "text": "Same question as before — returning the saved answer"})
+        yield sse({"type": "sources", "items": citations})
+        yield sse({"type": "token", "text": hit.answer})
+        _save_message(session_id, "assistant", hit.answer, payload=json.dumps({"sources": citations, "cached": True}))
+        return
+
     yield sse({"type": "status", "text": "Searching your notes…"})
     queries = build_queries(text, history)
-    hits = index.search(queries, k=6)
+    hits, similarity = index.search_scored(queries, k=6)
+    mention_ctx = ""
+    if mentions:
+        from .notes import mention_context
+        mention_ctx = mention_context(mentions)
+
+    off_topic = not hits or similarity < MIN_SIMILARITY
+    if not off_topic and not mention_ctx and similarity < CONFIDENT_SIMILARITY:
+        yield sse({"type": "status", "text": "Checking your book covers this…"})
+        off_topic = not _covered(text, queries, hits)
+    if off_topic and not mention_ctx:
+        # nothing in the book is about this question: don't let the model answer from its own knowledge
+        yield sse({"type": "sources", "items": []})
+        yield sse({"type": "token", "text": NOT_IN_BOOK})
+        _save_message(session_id, "assistant", NOT_IN_BOOK, payload=json.dumps({"sources": []}))
+        if key:
+            _store(key, text, NOT_IN_BOOK, [])
+        return
+
     citations = json.loads(citations_json(hits))
     yield sse({"type": "sources", "items": citations})
     system = STUDY_SYSTEM + "\n\nNOTES:\n" + (format_context(hits) if hits else "(no matching notes found)")
-    if mentions:
-        from .notes import mention_context
-        ctx = mention_context(mentions)
-        if ctx:
-            system += ("\n\nWORKSPACE NOTES Yahia @mentioned (his own pages; use them first and refer to them by "
-                       "name, not by number):\n" + ctx)
+    if mention_ctx:
+        system += ("\n\nWORKSPACE NOTES Yahia @mentioned (his own pages; use them first and refer to them by "
+                   "name, not by number):\n" + mention_ctx)
     messages = history[-8:] + [{"role": "user", "content": text + TURN_REMINDER}]
     answer = []
-    for tok in llm.stream_chat(messages, system=system, temperature=0.3):
+    for tok in llm.stream_chat(messages, system=system, temperature=0.2):
         answer.append(tok)
         yield sse({"type": "token", "text": tok})
-    _save_message(session_id, "assistant", "".join(answer).strip(), payload=json.dumps({"sources": citations}))
+    final = "".join(answer).strip()
+    if NOT_IN_BOOK.split(" —")[0].lower() in final.lower()[:40]:
+        final, citations = NOT_IN_BOOK, []        # a "don't know" answer should not show unrelated sources
+    _save_message(session_id, "assistant", final, payload=json.dumps({"sources": citations}))
+    if key and final:
+        _store(key, text, final, citations)
 
 
 def _parse_quiz_args(text: str) -> tuple[int, str]:

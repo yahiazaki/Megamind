@@ -130,6 +130,7 @@ export type NoteSummary = {
   updated_at: string;
   in_book: boolean;
   book_part: string;
+  book_mode: "" | "chapter" | "section";
   published_at: string | null;
   stale: boolean;
 };
@@ -140,6 +141,7 @@ export type Note = NoteSummary & {
   document_status?: string;
   document_error?: string;
   book_page?: number | null;
+  book_chapter?: string;
 };
 
 export type AssistResult = {

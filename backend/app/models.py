@@ -127,11 +127,23 @@ class Note(SQLModel, table=True):
     title: str = "Untitled"
     html: str = ""
     markdown: str = ""
-    document_id: Optional[int] = None  # library document created when the note is added to the book
+    document_id: Optional[int] = None  # its own chapter document, or the chapter it was inserted into
     book_part: str = ""                # part of the book it was added to
+    book_mode: str = ""                # "chapter" (its own chapter) or "section" (inside another chapter)
+    published_markdown: str = ""       # the version last put in the book, for "add only what's new"
     published_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=now)
     updated_at: datetime = Field(default_factory=now)
+
+
+class AnswerCache(SQLModel, table=True):
+    """Study-chat answers, so asking the same question again returns the same answer instantly."""
+    key: str = Field(primary_key=True)  # hash of question (+ context for follow-ups) + book fingerprint
+    question: str = ""
+    answer: str = ""
+    sources: str = "[]"
+    hits: int = 0
+    created_at: datetime = Field(default_factory=now)
 
 
 class Setting(SQLModel, table=True):

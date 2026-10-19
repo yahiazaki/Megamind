@@ -236,7 +236,7 @@ def _split_row(line: str) -> list[str]:
     return [c.strip().replace("\\|", "|") for c in cells]
 
 
-BLOCK_START = re.compile(r"^\s*(#{1,6}\s|```|\||!\[|\[\[IMG:|>|[-*]\s|\d+\.\s|(-{3,}|\*{3,})\s*$)")
+BLOCK_START = re.compile(r"^\s*(#{1,6}\s|```|\||!\[|\[\[IMG:|<!--|>|[-*]\s|\d+\.\s|(-{3,}|\*{3,})\s*$)")
 
 
 def _unwrap(lines: list[str]) -> list[str]:
@@ -253,7 +253,7 @@ def _unwrap(lines: list[str]) -> list[str]:
             out.append(line)
             continue
         prev = out[-1].strip() if out else ""
-        joinable_prev = prev and not re.match(r"^(#{1,6}\s|```|\||!\[|\[\[IMG:|(-{3,}|\*{3,})\s*$)", prev)
+        joinable_prev = prev and not re.match(r"^(#{1,6}\s|```|\||!\[|\[\[IMG:|<!--|(-{3,}|\*{3,})\s*$)", prev)
         if s and not BLOCK_START.match(line) and joinable_prev:
             out[-1] = out[-1].rstrip() + " " + s
         else:
@@ -304,6 +304,9 @@ def markdown_to_docx(text: str, out_docx: Path, title: str | None = None, image_
                     cell.text = ""
                     _add_inline(cell.paragraphs[0], row[c] if c < len(row) else "")
             d.add_paragraph()
+            continue
+        if stripped.startswith("<!--"):      # hidden markers, such as where a workspace note was inserted
+            i += 1
             continue
         img = IMAGE_RE.match(stripped)
         if img and image_dir is not None:
